@@ -113,37 +113,39 @@
 
     async function login() {
         const tg = window.Telegram.WebApp;
-        // 1. Проверяем, открыто ли через Telegram
+        let tempNick = "";
+
+        // Проверка входа через Telegram
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             const tgUser = tg.initDataUnsafe.user;
-            myNick = tgUser.username || ("id" + tgUser.id);
+            tempNick = tgUser.username || ("id" + tgUser.id);
             
-            const userRef = db.ref('users/' + myNick);
+            const userRef = db.ref('users/' + tempNick);
             const snapUser = await userRef.once('value');
             
             if (!snapUser.exists()) {
-                await userRef.set({
-                    password: "123", 
-                    role: "driver",
-                    tg_id: tgUser.id
-                });
-                alert("Вы успешно зарегистрированы через Telegram!");
+                await userRef.set({ password: "123", role: "driver", tg_id: tgUser.id });
             }
+            myNick = tempNick;
             localStorage.setItem('dnr_nick', myNick);
         }
 
-        // 2. Если не через ТГ и ника нет в памяти - спрашиваем
         if (!myNick) {
             myNick = prompt("Твой позывной:") || "Экипаж_" + Math.floor(Math.random()*99);
         }
 
-        // 3. Проверка пароля в Firebase
+        // ПРОВЕРКА НА БАН
+        const banSnap = await db.ref('banned/' + myNick).once('value');
+        if (banSnap.exists()) {
+            document.body.innerHTML = `<h1 style="color:white; text-align:center; padding-top:50px;">🚫 ДОСТУП ОГРАНИЧЕН<br><small>Ваш ник ${myNick} заблокирован</small></h1>`;
+            return;
+        }
+
         const snap = await db.ref('users/' + myNick).once('value');
         const userData = snap.val();
 
         if (userData && userData.password) {
             let savedPass = localStorage.getItem('dnr_pass');
-            // Если зашли через ТГ - пускаем сразу, если нет - просим пароль
             let pass = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? userData.password.toString() : (savedPass || prompt(`Ник "${myNick}" защищен. Введите пароль:`));
             
             if (pass === userData.password.toString()) {
@@ -197,7 +199,10 @@
                 const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 const isAdm = m.a === 'Джокер_ДНР';
                 return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
-                    <div class="msg-meta"><b style="${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b><span>${timeStr}</span></div>
+                    <div class="msg-meta">
+                        <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
+                        <span>${timeStr}</span>
+                    </div>
                     <div>${m.t}</div>
                     ${(m.a === myNick || isAdmin) ? `<span onclick="delChatMsg('${id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>` : ''}
                 </div>`;
@@ -228,6 +233,15 @@
                     </div>
                 </div>`);
         });
+    }
+
+    // НОВАЯ ФУНКЦИЯ ДЛЯ БАНА ИЗ ЧАТА
+    function adminAction(target) {
+        if (!isAdmin || target === myNick) return;
+        if (confirm("ЗАБАНИТЬ пользователя " + target + "?")) {
+            db.ref('banned/' + target).set(true);
+            alert("Пользователь заблокирован!");
+        }
     }
 
     function saveM(coords, type) {
@@ -317,5 +331,4 @@
     login();
 </script>
 </body>
-
 </html>
