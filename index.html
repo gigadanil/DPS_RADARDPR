@@ -89,7 +89,6 @@
 <div id="map"></div>
 
 <script>
-    // КОНФИГУРАЦИЯ SUPABASE (Данные из твоих скриншотов)
     const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co"; 
     const SUPABASE_KEY = "sb_publishable__RdzKz1jG3I1U3AMrgHNXw_TVOfcPZX"; 
     const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -98,6 +97,43 @@
     const DNR_BOUNDS = { lat: [47.0, 49.2], lon: [36.5, 39.3] }; 
 
     let myMap, myNick = localStorage.getItem('dnr_nick'), isAdmin = false, lastMsgTime = 0;
+
+    // --- Функции загрузки вынесены наружу для мгновенного доступа ---
+    const loadMarkers = async () => {
+        const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
+        myMap.geoObjects.removeAll();
+        let count = 0;
+        if (markers) {
+            markers.forEach(m => { renderM(m, m.id); count++; });
+        }
+        document.getElementById('stat-m').innerText = count;
+    };
+
+    const loadChat = async () => {
+        const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
+        const html = msgs ? msgs.reverse().map(m => {
+            const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const isAdm = m.a === 'Джокер_ДНР';
+            return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
+                <div class="msg-meta">
+                    <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
+                    <span>${timeStr}</span>
+                </div>
+                <div>${m.t}</div>
+                ${(m.a === myNick || isAdmin) ? `<span onclick="delChatMsg('${m.id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>` : ''}
+            </div>`;
+        }).join('') : '';
+        document.getElementById('chat-msgs').innerHTML = html;
+        const cb = document.getElementById('chat-msgs'); cb.scrollTop = cb.scrollHeight;
+    };
+
+    const loadRatings = async () => {
+        const { data: r } = await _sb.from('ratings').select('*');
+        const rObj = {};
+        if(r) r.forEach(row => rObj[row.nick] = row.score);
+        document.getElementById('u-rating-val').innerText = rObj[myNick] || 0;
+        window.allRatings = rObj;
+    };
 
     function isClean(text) {
         if(!text) return true;
@@ -114,7 +150,6 @@
     async function login() {
         const tg = window.Telegram.WebApp;
         let tempNick = "";
-
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             const tgUser = tg.initDataUnsafe.user;
             tempNick = tgUser.username || ("id" + tgUser.id);
@@ -125,23 +160,18 @@
             myNick = tempNick;
             localStorage.setItem('dnr_nick', myNick);
         }
-
         if (!myNick) {
             myNick = prompt("Твой позывной:") || "Экипаж_" + Math.floor(Math.random()*99);
         }
-
         const { data: ban } = await _sb.from('banned').select('*').eq('nick', myNick).single();
         if (ban) {
             document.body.innerHTML = `<h1 style="color:white; text-align:center; padding-top:50px;">🚫 ДОСТУП ОГРАНИЧЕН<br><small>Ваш ник ${myNick} заблокирован</small></h1>`;
             return;
         }
-
         const { data: userData } = await _sb.from('users').select('*').eq('nick', myNick).single();
-
         if (userData && userData.password) {
             let savedPass = localStorage.getItem('dnr_pass');
             let pass = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? userData.password.toString() : (savedPass || prompt(`Ник "${myNick}" защищен. Введите пароль:`));
-            
             if (pass === userData.password.toString()) {
                 localStorage.setItem('dnr_nick', myNick);
                 localStorage.setItem('dnr_pass', pass);
@@ -171,45 +201,9 @@
     }
 
     async function startListeners() {
-        const loadMarkers = async () => {
-            const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
-            myMap.geoObjects.removeAll();
-            let count = 0;
-            if (markers) {
-                markers.forEach(m => { renderM(m, m.id); count++; });
-            }
-            document.getElementById('stat-m').innerText = count;
-        };
-
-        const loadChat = async () => {
-            const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
-            const html = msgs ? msgs.reverse().map(m => {
-                const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                const isAdm = m.a === 'Джокер_ДНР';
-                return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
-                    <div class="msg-meta">
-                        <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
-                        <span>${timeStr}</span>
-                    </div>
-                    <div>${m.t}</div>
-                    ${(m.a === myNick || isAdmin) ? `<span onclick="delChatMsg('${m.id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>` : ''}
-                </div>`;
-            }).join('') : '';
-            document.getElementById('chat-msgs').innerHTML = html;
-            const cb = document.getElementById('chat-msgs'); cb.scrollTop = cb.scrollHeight;
-        };
-
-        const loadRatings = async () => {
-            const { data: r } = await _sb.from('ratings').select('*');
-            const rObj = {};
-            if(r) r.forEach(row => rObj[row.nick] = row.score);
-            document.getElementById('u-rating-val').innerText = rObj[myNick] || 0;
-            window.allRatings = rObj;
-        };
-
         loadMarkers(); loadChat(); loadRatings();
-        setInterval(loadMarkers, 20000);
-        setInterval(loadChat, 5000);
+        setInterval(loadMarkers, 10000); // Обновление раз в 10 сек
+        setInterval(loadChat, 4000);
 
         myMap.events.add('click', e => {
             const coords = e.get('coords');
@@ -245,6 +239,7 @@
         await _sb.from('markers').insert([{ coords, type, author: myNick, text: txt, img, ts: now, exp: now + 7200000 }]);
         updateRating(10, myNick);
         myMap.balloon.close();
+        loadMarkers(); // МГНОВЕННОЕ ОБНОВЛЕНИЕ
     }
 
     function renderM(m, id) {
@@ -254,28 +249,21 @@
         if (m.comments) {
             commsHtml = Object.values(m.comments).map(c => `<div class="comm-item"><b>${c.a}:</b> ${c.t}</div>`).join('');
         }
-
         const p = new ymaps.Placemark(m.coords, {
             balloonContent: `<div style="width:220px; font-size:12px;">
                 <div style="display:flex; justify-content:space-between;"><b>${m.type.toUpperCase()}</b> <small>${new Date(m.ts).toLocaleTimeString()}</small></div>
                 <i>${m.text}</i><br>
                 ${m.img ? `<a href="${m.img}" target="_blank"><img src="${m.img}" class="m-img" onerror="this.style.display='none'"></a>` : ''}
-                
                 <div class="comm-box">
-                    <div style="font-weight:bold; font-size:10px; color:#007bff;">💬 УТОЧНЕНИЯ:</div>
                     <div id="comms-${id}" style="max-height:60px; overflow-y:auto; margin-bottom:5px;">${commsHtml || 'Пусто'}</div>
                     <div style="display:flex; gap:3px;">
                         <input id="in-com-${id}" class="input-style" placeholder="Добавить..." style="margin:0; font-size:10px; height:18px;">
                         <button onclick="addComment('${id}')" style="background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; width:30px;">+</button>
                     </div>
                 </div>
-
-                <div style="margin-top:8px; border-top:1px solid #eee; padding-top:8px; display:flex; flex-direction:column; gap:4px;">
-                    <button class="btn btn-orange" style="margin:0; padding:4px; font-size:10px;" onclick="reportM('${id}', '${m.author}')">🚫 ОБМАНУЛ (${reportsCount})</button>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <small>Автор: ${m.author}</small>
-                        ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" style="padding:2px 8px; font-size:9px; width:auto; margin:0;" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
-                    </div>
+                <div style="margin-top:8px; display:flex; flex-direction:column; gap:4px;">
+                    <button class="btn btn-orange" onclick="reportM('${id}', '${m.author}')">🚫 ОБМАНУЛ (${reportsCount})</button>
+                    ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
                 </div>
             </div>`
         }, { iconLayout: 'default#image', iconImageHref: 'https://cdn-icons-png.flaticon.com/512/' + icons[m.type], iconImageSize: [34, 34] });
@@ -285,14 +273,13 @@
     async function addComment(mId) {
         const input = document.getElementById('in-com-' + mId);
         if (!input.value.trim() || !isClean(input.value)) return;
-        
         const { data } = await _sb.from('markers').select('comments').eq('id', mId).single();
         const newComments = data.comments || {};
         const cId = Date.now();
         newComments[cId] = { a: myNick, t: input.value.trim(), ts: cId };
-        
         await _sb.from('markers').update({ comments: newComments }).eq('id', mId);
         input.value = "";
+        loadMarkers(); // МГНОВЕННОЕ ОБНОВЛЕНИЕ
     }
 
     async function reportM(mId, author) {
@@ -300,31 +287,33 @@
         const { data } = await _sb.from('markers').select('reports').eq('id', mId).single();
         const newReports = data.reports || {};
         newReports[myNick.replace(/\s/g, '_')] = true;
-        
         if (Object.keys(newReports).length >= 3) {
             await _sb.from('markers').delete().eq('id', mId);
             updateRating(-50, author);
         } else {
             await _sb.from('markers').update({ reports: newReports }).eq('id', mId);
         }
+        loadMarkers();
     }
 
     async function sendMsg() {
         const i = document.getElementById('chat-in');
-        if (!i.value.trim() || !isClean(i.value) || Date.now() - lastMsgTime < 3000) return;
+        if (!i.value.trim() || !isClean(i.value) || Date.now() - lastMsgTime < 2000) return;
         await _sb.from('chat').insert([{ a: myNick, t: i.value.trim(), ts: Date.now() }]);
         lastMsgTime = Date.now(); i.value = '';
+        loadChat(); // МГНОВЕННОЕ ОБНОВЛЕНИЕ
     }
 
     async function updateRating(p, user) {
         const { data } = await _sb.from('ratings').select('score').eq('nick', user).single();
         const newScore = (data ? data.score : 0) + p;
         await _sb.from('ratings').upsert({ nick: user, score: newScore });
+        loadRatings();
     }
 
-    async function delM(id) { if(confirm("Удалить?")) await _sb.from('markers').delete().eq('id', id); }
-    async function delChatMsg(id) { await _sb.from('chat').delete().eq('id', id); }
-    async function adminClearAll() { if(isAdmin && confirm("УДАЛИТЬ ВСЁ?")) await _sb.from('markers').delete().neq('author', 'none'); }
+    async function delM(id) { if(confirm("Удалить?")) { await _sb.from('markers').delete().eq('id', id); loadMarkers(); } }
+    async function delChatMsg(id) { await _sb.from('chat').delete().eq('id', id); loadChat(); }
+    async function adminClearAll() { if(isAdmin && confirm("УДАЛИТЬ ВСЁ?")) { await _sb.from('markers').delete().neq('author', 'none'); loadMarkers(); } }
     function toggleBox(id) { document.getElementById(id).classList.toggle('hidden'); }
     function goTo(c) { myMap.setCenter(c, 12, { duration: 500 }); }
     function showLeaderboard() {
@@ -337,4 +326,3 @@
 </script>
 </body>
 </html>
-
