@@ -98,7 +98,17 @@
 
     let myMap, myNick = localStorage.getItem('dnr_nick'), isAdmin = false, lastMsgTime = 0;
 
-    // --- Функции загрузки вынесены наружу для мгновенного доступа ---
+    // --- СИСТЕМА БАНА ---
+    async function checkBan() {
+        if (!myNick) return false;
+        const { data: ban } = await _sb.from('banned').select('*').eq('nick', myNick).single();
+        if (ban) {
+            document.body.innerHTML = `<div style="color:white; text-align:center; padding-top:100px; font-family:sans-serif;"><h1>🚫 ДОСТУП ОГРАНИЧЕН</h1><p>Ваш позывной <b>${myNick}</b> заблокирован администрацией.</p></div>`;
+            return true;
+        }
+        return false;
+    }
+
     const loadMarkers = async () => {
         const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
         myMap.geoObjects.removeAll();
@@ -113,7 +123,7 @@
         const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
         const html = msgs ? msgs.reverse().map(m => {
             const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            const isAdm = m.a === 'Джокер_ДНР';
+            const isAdm = m.a === 'Джокер_ДНР' || m.role === 'admin';
             return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
                 <div class="msg-meta">
                     <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
@@ -150,41 +160,40 @@
     async function login() {
         const tg = window.Telegram.WebApp;
         let tempNick = "";
+
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             const tgUser = tg.initDataUnsafe.user;
             tempNick = tgUser.username || ("id" + tgUser.id);
             const { data: user } = await _sb.from('users').select('*').eq('nick', tempNick).single();
             if (!user) {
-                await _sb.from('users').insert([{ nick: tempNick, password: "123", role: "driver", tg_id: tgUser.id.toString() }]);
+                const roleSetting = (tempNick === 'Джокер_ДНР') ? 'admin' : 'driver';
+                await _sb.from('users').insert([{ nick: tempNick, password: "123", role: roleSetting, tg_id: tgUser.id.toString() }]);
             }
             myNick = tempNick;
-            localStorage.setItem('dnr_nick', myNick);
         }
+
         if (!myNick) {
             myNick = prompt("Твой позывной:") || "Экипаж_" + Math.floor(Math.random()*99);
         }
-        const { data: ban } = await _sb.from('banned').select('*').eq('nick', myNick).single();
-        if (ban) {
-            document.body.innerHTML = `<h1 style="color:white; text-align:center; padding-top:50px;">🚫 ДОСТУП ОГРАНИЧЕН<br><small>Ваш ник ${myNick} заблокирован</small></h1>`;
-            return;
-        }
+
+        if (await checkBan()) return;
+
         const { data: userData } = await _sb.from('users').select('*').eq('nick', myNick).single();
-        if (userData && userData.password) {
-            let savedPass = localStorage.getItem('dnr_pass');
-            let pass = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? userData.password.toString() : (savedPass || prompt(`Ник "${myNick}" защищен. Введите пароль:`));
-            if (pass === userData.password.toString()) {
-                localStorage.setItem('dnr_nick', myNick);
-                localStorage.setItem('dnr_pass', pass);
-                if (userData.role === 'admin') isAdmin = true;
-            } else {
-                alert("Неверный пароль!");
-                localStorage.removeItem('dnr_nick');
-                location.reload();
-                return;
+        if (userData) {
+            if (userData.role === 'admin' || myNick === 'Джокер_ДНР') isAdmin = true;
+            
+            if (userData.password && !tg.initDataUnsafe.user) {
+                let savedPass = localStorage.getItem('dnr_pass');
+                let pass = savedPass || prompt(`Ник "${myNick}" защищен. Пароль:`);
+                if (pass === userData.password.toString()) {
+                    localStorage.setItem('dnr_pass', pass);
+                } else {
+                    alert("Ошибка!"); location.reload(); return;
+                }
             }
-        } else {
-            localStorage.setItem('dnr_nick', myNick);
         }
+        
+        localStorage.setItem('dnr_nick', myNick);
         initApp();
     }
 
@@ -202,7 +211,7 @@
 
     async function startListeners() {
         loadMarkers(); loadChat(); loadRatings();
-        setInterval(loadMarkers, 10000); // Обновление раз в 10 сек
+        setInterval(loadMarkers, 10000);
         setInterval(loadChat, 4000);
 
         myMap.events.add('click', e => {
@@ -223,15 +232,46 @@
         });
     }
 
+    async function sendMsg() {
+        if (await checkBan()) return;
+        const i = document.getElementById('chat-in');
+        const val = i.value.trim();
+        if (!val || !isClean(val) || Date.now() - lastMsgTime < 2000) return;
+
+        if (val.toLowerCase() === '/admin') {
+            i.value = '';
+            if (!isAdmin) { systemNotify("Отказ: нет прав."); return; }
+            const { count: uTotal } = await _sb.from('users').select('*', { count: 'exact', head: true });
+            const { count: cAct } = await _sb.from('chat').select('*', { count: 'exact', head: true }).gt('ts', Date.now() - 900000);
+            systemNotify(`📊 ШТАБ: Всего юзеров: ${uTotal}, Актив (15м): ${cAct}`);
+            return;
+        }
+
+        await _sb.from('chat').insert([{ a: myNick, t: val, ts: Date.now() }]);
+        lastMsgTime = Date.now(); i.value = '';
+        loadChat();
+    }
+
+    function systemNotify(text) {
+        const chatMsgs = document.getElementById('chat-msgs');
+        const note = document.createElement('div');
+        note.style = "background: #34495e; color: #f1c40f; padding: 8px; border-radius: 8px; font-size: 11px; margin: 5px 0; border-left: 4px solid #f1c40f;";
+        note.innerHTML = `<b>СИСТЕМА:</b> ${text}`;
+        chatMsgs.appendChild(note);
+        chatMsgs.scrollTop = chatMsgs.scrollHeight;
+    }
+
     async function adminAction(target) {
         if (!isAdmin || target === myNick) return;
         if (confirm("ЗАБАНИТЬ пользователя " + target + "?")) {
             await _sb.from('banned').insert([{ nick: target }]);
-            alert("Пользователь заблокирован!");
+            alert("Ник заблокирован!");
+            loadChat();
         }
     }
 
     async function saveM(coords, type) {
+        if (await checkBan()) return;
         const txt = document.getElementById('m-txt').value || "Работают";
         const img = document.getElementById('m-img-url').value.trim();
         if(!isClean(txt) || !isClean(img)) return;
@@ -239,38 +279,33 @@
         await _sb.from('markers').insert([{ coords, type, author: myNick, text: txt, img, ts: now, exp: now + 7200000 }]);
         updateRating(10, myNick);
         myMap.balloon.close();
-        loadMarkers(); // МГНОВЕННОЕ ОБНОВЛЕНИЕ
+        loadMarkers();
     }
 
     function renderM(m, id) {
         const icons = { dps: '2555/2555013.png', spec: '2554/2554978.png', mobile: '809/809998.png', check: '2666/2666505.png' };
         const reportsCount = m.reports ? Object.keys(m.reports).length : 0;
-        let commsHtml = "";
-        if (m.comments) {
-            commsHtml = Object.values(m.comments).map(c => `<div class="comm-item"><b>${c.a}:</b> ${c.t}</div>`).join('');
-        }
+        let commsHtml = m.comments ? Object.values(m.comments).map(c => `<div class="comm-item"><b>${c.a}:</b> ${c.t}</div>`).join('') : "";
+        
         const p = new ymaps.Placemark(m.coords, {
             balloonContent: `<div style="width:220px; font-size:12px;">
                 <div style="display:flex; justify-content:space-between;"><b>${m.type.toUpperCase()}</b> <small>${new Date(m.ts).toLocaleTimeString()}</small></div>
                 <i>${m.text}</i><br>
-                ${m.img ? `<a href="${m.img}" target="_blank"><img src="${m.img}" class="m-img" onerror="this.style.display='none'"></a>` : ''}
+                ${m.img ? `<img src="${m.img}" class="m-img">` : ''}
                 <div class="comm-box">
-                    <div id="comms-${id}" style="max-height:60px; overflow-y:auto; margin-bottom:5px;">${commsHtml || 'Пусто'}</div>
-                    <div style="display:flex; gap:3px;">
-                        <input id="in-com-${id}" class="input-style" placeholder="Добавить..." style="margin:0; font-size:10px; height:18px;">
-                        <button onclick="addComment('${id}')" style="background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; width:30px;">+</button>
-                    </div>
+                    <div id="comms-${id}" style="max-height:50px; overflow-y:auto;">${commsHtml || 'Нет комментариев'}</div>
+                    <input id="in-com-${id}" class="input-style" style="width:70%; height:18px; font-size:10px;" placeholder="Текст...">
+                    <button onclick="addComment('${id}')" style="width:20%; height:20px;">+</button>
                 </div>
-                <div style="margin-top:8px; display:flex; flex-direction:column; gap:4px;">
-                    <button class="btn btn-orange" onclick="reportM('${id}', '${m.author}')">🚫 ОБМАНУЛ (${reportsCount})</button>
-                    ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
-                </div>
+                <button class="btn btn-orange" onclick="reportM('${id}', '${m.author}')">🚫 ОБМАН (${reportsCount})</button>
+                ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
             </div>`
         }, { iconLayout: 'default#image', iconImageHref: 'https://cdn-icons-png.flaticon.com/512/' + icons[m.type], iconImageSize: [34, 34] });
         myMap.geoObjects.add(p);
     }
 
     async function addComment(mId) {
+        if (await checkBan()) return;
         const input = document.getElementById('in-com-' + mId);
         if (!input.value.trim() || !isClean(input.value)) return;
         const { data } = await _sb.from('markers').select('comments').eq('id', mId).single();
@@ -278,12 +313,11 @@
         const cId = Date.now();
         newComments[cId] = { a: myNick, t: input.value.trim(), ts: cId };
         await _sb.from('markers').update({ comments: newComments }).eq('id', mId);
-        input.value = "";
-        loadMarkers(); // МГНОВЕННОЕ ОБНОВЛЕНИЕ
+        input.value = ""; loadMarkers();
     }
 
     async function reportM(mId, author) {
-        if (author === myNick) return;
+        if (await checkBan()) return;
         const { data } = await _sb.from('markers').select('reports').eq('id', mId).single();
         const newReports = data.reports || {};
         newReports[myNick.replace(/\s/g, '_')] = true;
@@ -296,18 +330,9 @@
         loadMarkers();
     }
 
-    async function sendMsg() {
-        const i = document.getElementById('chat-in');
-        if (!i.value.trim() || !isClean(i.value) || Date.now() - lastMsgTime < 2000) return;
-        await _sb.from('chat').insert([{ a: myNick, t: i.value.trim(), ts: Date.now() }]);
-        lastMsgTime = Date.now(); i.value = '';
-        loadChat(); // МГНОВЕННОЕ ОБНОВЛЕНИЕ
-    }
-
     async function updateRating(p, user) {
         const { data } = await _sb.from('ratings').select('score').eq('nick', user).single();
-        const newScore = (data ? data.score : 0) + p;
-        await _sb.from('ratings').upsert({ nick: user, score: newScore });
+        await _sb.from('ratings').upsert({ nick: user, score: (data ? data.score : 0) + p });
         loadRatings();
     }
 
