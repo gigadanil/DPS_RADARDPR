@@ -98,7 +98,6 @@
 
     let myMap, myNick = localStorage.getItem('dnr_nick'), isAdmin = false, lastMsgTime = 0;
 
-    // --- СИСТЕМА БАНА ---
     async function checkBan() {
         if (!myNick) return false;
         const { data: ban } = await _sb.from('banned').select('*').eq('nick', myNick).single();
@@ -111,19 +110,21 @@
 
     const loadMarkers = async () => {
         const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
-        myMap.geoObjects.removeAll();
-        let count = 0;
-        if (markers) {
-            markers.forEach(m => { renderM(m, m.id); count++; });
+        if (myMap) {
+            myMap.geoObjects.removeAll();
+            let count = 0;
+            if (markers) {
+                markers.forEach(m => { renderM(m, m.id); count++; });
+            }
+            document.getElementById('stat-m').innerText = count;
         }
-        document.getElementById('stat-m').innerText = count;
     };
 
     const loadChat = async () => {
         const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
         const html = msgs ? msgs.reverse().map(m => {
             const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            const isAdm = m.a === 'Джокер_ДНР''Bulgakov_pisatel' || m.role === 'admin';
+            const isAdm = m.a === 'Джокер_ДНР' || m.a === 'Bulgakov_pisatel';
             return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
                 <div class="msg-meta">
                     <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
@@ -159,38 +160,60 @@
 
     async function login() {
         const tg = window.Telegram.WebApp;
-        let tempNick = "";
-
+        let tgId = "";
+        
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            const tgUser = tg.initDataUnsafe.user;
-            tempNick = tgUser.username || ("id" + tgUser.id);
-            const { data: user } = await _sb.from('users').select('*').eq('nick', tempNick).single();
-            if (!user) {
-                const roleSetting = (tempNick === 'Джокер_ДНР') ? 'admin' : 'driver';
-                await _sb.from('users').insert([{ nick: tempNick, password: "123", role: roleSetting, tg_id: tgUser.id.toString() }]);
-            }
-            myNick = tempNick;
+            tgId = tg.initDataUnsafe.user.id.toString();
         }
 
-        if (!myNick) {
-            myNick = prompt("Твой позывной:") || "Экипаж_" + Math.floor(Math.random()*99);
+        let userById = null;
+        if (tgId) {
+            const { data } = await _sb.from('users').select('*').eq('tg_id', tgId).single();
+            userById = data;
+        }
+
+        if (userById) {
+            myNick = userById.nick;
+        } else {
+            let chosenNick = prompt("Придумайте позывной (Буквы, цифры, без пробелов):");
+            const nickRegex = /^[a-zA-Zа-яА-Я0-9_]+$/;
+
+            while (true) {
+                if (!chosenNick) {
+                    chosenNick = prompt("Ник обязателен для входа:");
+                    continue;
+                }
+                chosenNick = chosenNick.trim();
+                if (chosenNick.length < 3 || chosenNick.length > 15) {
+                    chosenNick = prompt("Длина ника должна быть от 3 до 15 символов:");
+                } else if (!nickRegex.test(chosenNick)) {
+                    chosenNick = prompt("Только буквы, цифры и подчёркивание! Без пробелов и символов:");
+                } else {
+                    const { data: existing } = await _sb.from('users').select('nick').eq('nick', chosenNick).single();
+                    if (existing) {
+                        chosenNick = prompt("Этот позывной уже занят! Придумайте другой:");
+                    } else {
+                        break; 
+                    }
+                }
+            }
+
+            const roleSetting = (chosenNick === 'Джокер_ДНР' || chosenNick === 'Admin') ? 'admin' : 'driver';
+            await _sb.from('users').insert([{ 
+                nick: chosenNick, 
+                tg_id: tgId || null, 
+                role: roleSetting,
+                password: "123" 
+            }]);
+            myNick = chosenNick;
+            alert(`Регистрация успешна! Ваш позывной: ${myNick}`);
         }
 
         if (await checkBan()) return;
 
         const { data: userData } = await _sb.from('users').select('*').eq('nick', myNick).single();
-        if (userData) {
-            if (userData.role === 'admin' || myNick === 'Джокер_ДНР') isAdmin = true;
-            
-            if (userData.password && !tg.initDataUnsafe.user) {
-                let savedPass = localStorage.getItem('dnr_pass');
-                let pass = savedPass || prompt(`Ник "${myNick}" защищен. Пароль:`);
-                if (pass === userData.password.toString()) {
-                    localStorage.setItem('dnr_pass', pass);
-                } else {
-                    alert("Ошибка!"); location.reload(); return;
-                }
-            }
+        if (userData && (userData.role === 'admin' || myNick === 'Джокер_ДНР')) {
+            isAdmin = true;
         }
         
         localStorage.setItem('dnr_nick', myNick);
@@ -294,8 +317,10 @@
                 ${m.img ? `<img src="${m.img}" class="m-img">` : ''}
                 <div class="comm-box">
                     <div id="comms-${id}" style="max-height:50px; overflow-y:auto;">${commsHtml || 'Нет комментариев'}</div>
-                    <input id="in-com-${id}" class="input-style" style="width:70%; height:18px; font-size:10px;" placeholder="Текст...">
-                    <button onclick="addComment('${id}')" style="width:20%; height:20px;">+</button>
+                    <div style="display:flex; gap:3px; margin-top:5px;">
+                        <input id="in-com-${id}" class="input-style" style="width:75%; height:20px; font-size:10px; margin:0;" placeholder="Текст...">
+                        <button onclick="addComment('${id}')" style="width:20%; height:22px; cursor:pointer;">+</button>
+                    </div>
                 </div>
                 <button class="btn btn-orange" onclick="reportM('${id}', '${m.author}')">🚫 ОБМАН (${reportsCount})</button>
                 ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
@@ -307,7 +332,7 @@
     async function addComment(mId) {
         if (await checkBan()) return;
         const input = document.getElementById('in-com-' + mId);
-        if (!input.value.trim() || !isClean(input.value)) return;
+        if (!input || !input.value.trim() || !isClean(input.value)) return;
         const { data } = await _sb.from('markers').select('comments').eq('id', mId).single();
         const newComments = data.comments || {};
         const cId = Date.now();
@@ -351,4 +376,3 @@
 </script>
 </body>
 </html>
-
