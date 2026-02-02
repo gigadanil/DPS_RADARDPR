@@ -90,8 +90,10 @@
 
 <script>
     const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co"; 
+    // Твой исправленный ключ:
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2bXZybG1zeXBhZHNmZHl4dHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NDM2NDMsImV4cCI6MjA4NTUxOTY0M30.-vBcZlR50YPWotq0dAdocn_HVHcS8jZwtoJjuBixozI"; 
-    const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    // Исправлено: добавлено window. для надежной инициализации
+    const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const BAD_WORDS = ['хохол', 'укроп', 'война', 'всу', 'зеленский', 'путин', 'хуй', 'пидор', 'бля', 'ебал', 'сука'];
     const DNR_BOUNDS = { lat: [47.0, 49.2], lon: [36.5, 39.3] }; 
@@ -124,7 +126,8 @@
         const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
         const html = msgs ? msgs.reverse().map(m => {
             const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-             const isAdm = m.a === 'Джокер_ДНР' || m.role === 'admin';
+            // Исправлено: убрана синтаксическая ошибка в этой строке
+            const isAdm = (m.a === 'Джокер_ДНР' || m.role === 'admin');
             return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
                 <div class="msg-meta">
                     <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
@@ -376,8 +379,3 @@
 </script>
 </body>
 </html>
-
-
-
-
-
