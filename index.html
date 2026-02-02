@@ -124,7 +124,7 @@
         const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
         const html = msgs ? msgs.reverse().map(m => {
             const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-             const isAdm = m.a === 'Джокер_ДНР' || m.a === 'Bulgakov_pisatel' || m.role === 'admin';
+             const isAdm = m.a === 'Джокер_ДНР' || m.role === 'admin';
             return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
                 <div class="msg-meta">
                     <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
@@ -376,6 +376,7 @@
 </script>
 </body>
 </html>
+
 
 
 
