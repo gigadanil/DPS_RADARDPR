@@ -2,145 +2,77 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>РАДАР ДПС ДНР</title>
+    <title>RADAR TEST</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://api-maps.yandex.ru/2.1/?apikey=7f7db9e2-0eff-47d4-98d3-59b326552ed7&lang=ru_RU"></script>
     <style>
-        body, html { width: 100%; height: 100%; margin: 0; padding: 0; background: #121212; color: white; font-family: sans-serif; overflow: hidden; }
-        #map { width: 100%; height: 100vh; }
-        .ui-element { position: absolute; z-index: 1000; background: rgba(255,255,255,0.95); color: #333; padding: 12px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        .panel { top: 10px; left: 10px; width: 220px; }
-        .chat-container { bottom: 20px; right: 10px; width: 300px; height: 380px; display: flex; flex-direction: column; }
-        #chat-msgs { flex-grow: 1; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 8px; margin-bottom: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
-        .msg { background: white; padding: 6px 10px; border-radius: 8px; border-left: 4px solid #007bff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .chat-input-area { display: flex; gap: 5px; }
-        input { flex-grow: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
-        button { padding: 8px 15px; border: none; background: #007bff; color: white; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        #error-display { position: absolute; top: 0; width: 100%; background: red; color: white; font-size: 11px; z-index: 9999; display: none; padding: 2px; }
+        body { margin: 0; background: #222; color: #fff; font-family: sans-serif; }
+        #map { width: 100%; height: 60vh; background: #333; }
+        #chat { height: 35vh; overflow-y: auto; padding: 10px; background: #111; font-size: 12px; }
+        .msg { border-bottom: 1px solid #333; padding: 5px; }
+        .ui { padding: 10px; display: flex; gap: 5px; }
+        input { flex: 1; padding: 8px; }
     </style>
 </head>
 <body>
 
-<div id="error-display"></div>
-
-<div class="ui-element panel">
-    <b>ШТАБ РАДАРА</b><br>
-    Позывной: <span id="u-nick" style="color:#007bff">Загрузка...</span><br>
-    <div style="margin-top:5px; font-size:12px; color:#666;">Постов на карте: <b id="stat-m" style="color:red">0</b></div>
-</div>
-
-<div class="ui-element chat-container">
-    <div id="chat-msgs"></div>
-    <div class="chat-input-area">
-        <input type="text" id="chat-in" placeholder="Сообщение...">
-        <button onclick="sendMsg()">➤</button>
-    </div>
-</div>
-
 <div id="map"></div>
+<div class="ui">
+    <input type="text" id="in" placeholder="Сообщение...">
+    <button onclick="send()">ОК</button>
+</div>
+<div id="chat"></div>
 
 <script>
-    // Логирование ошибок для отладки прямо в приложении
-    window.onerror = function(msg, url, line) {
-        const errDiv = document.getElementById('error-display');
-        errDiv.style.display = 'block';
-        errDiv.innerHTML = "Ошибка: " + msg + " | Линия: " + line;
-    };
+    // Сразу выводим лог, если что-то упадет
+    window.onerror = function(m, u, l) { alert("ОШИБКА: " + m + " в строке " + l); };
 
-    const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co";
-    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2bXZybG1zeXBhZHNmZHl4dHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NDM2NDMsImV4cCI6MjA4NTUxOTY0M30.-vBcZlR50YPWotq0dAdocn_HVHcS8jZwtoJjuBixozI";
-    const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co";
+    const KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2bXZybG1zeXBhZHNmZHl4dHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NDM2NDMsImV4cCI6MjA4NTUxOTY0M30.-vBcZlR50YPWotq0dAdocn_HVHcS8jZwtoJjuBixozI";
+    const _sb = window.supabase.createClient(URL, KEY);
+    
+    let myMap;
+    let myNick = "User_" + Math.floor(Math.random() * 1000);
 
-    let myMap, myNick = localStorage.getItem('dnr_nick') || "Водитель_" + Math.floor(Math.random()*900 + 100);
-    localStorage.setItem('dnr_nick', myNick);
-
-    function init() {
-        document.getElementById('u-nick').innerText = myNick;
-        
+    function start() {
+        console.log("Запуск...");
         ymaps.ready(() => {
-            myMap = new ymaps.Map("map", { 
-                center: [48.01, 37.80], 
-                zoom: 11,
-                controls: ['zoomControl']
-            });
-
-            loadMarkers();
+            myMap = new ymaps.Map("map", { center: [48.01, 37.80], zoom: 11 });
+            console.log("Карта готова");
             loadChat();
-            
-            // Интервалы обновления
-            setInterval(loadMarkers, 10000);
-            setInterval(loadChat, 4000);
-
-            // Клик по карте для новой метки
-            myMap.events.add('click', (e) => {
-                const coords = e.get('coords');
-                const text = prompt("Что там? (ДПС, Проверка документов и т.д.)");
-                if(text) saveMarker(coords, text);
-            });
+            setInterval(loadChat, 5000);
         });
     }
 
-    async function loadMarkers() {
-        const { data: markers, error } = await _sb.from('markers').select('*').gt('exp', Date.now());
-        if (markers && myMap) {
-            myMap.geoObjects.removeAll();
-            markers.forEach(m => {
-                const p = new ymaps.Placemark(m.coords, { 
-                    balloonContent: "<b>" + m.author + ":</b><br>" + m.text 
-                }, {
-                    preset: 'islands#redDotIcon'
-                });
-                myMap.geoObjects.add(p);
-            });
-            document.getElementById('stat-m').innerText = markers.length;
-        }
-    }
-
-    // ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ФУНКЦИЯ ЧАТА
     async function loadChat() {
-        const { data: msgs, error } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(25);
-        if (!msgs) return;
-
-        let chatHtml = "";
-        // Используем обычный цикл для надежности
-        const reversed = msgs.reverse();
-        for (let i = 0; i < reversed.length; i++) {
-            const m = reversed[i];
-            chatHtml += '<div class="msg"><b>' + m.a + ':</b> ' + m.t + '</div>';
-        }
-
-        const box = document.getElementById('chat-msgs');
-        box.innerHTML = chatHtml;
-        box.scrollTop = box.scrollHeight;
-    }
-
-    async function sendMsg() {
-        const input = document.getElementById('chat-in');
-        const text = input.value.trim();
-        if (!text) return;
-
-        const { error } = await _sb.from('chat').insert([{ a: myNick, t: text, ts: Date.now() }]);
-        if(!error) {
-            input.value = "";
-            loadChat();
+        const { data, error } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(20);
+        if (error) { console.error(error); return; }
+        
+        const chatDiv = document.getElementById('chat');
+        chatDiv.innerHTML = ""; // Полная очистка
+        
+        if (data) {
+            data.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'msg';
+                div.innerHTML = "<b>" + item.a + ":</b> " + item.t;
+                chatDiv.appendChild(div);
+            });
         }
     }
 
-    async function saveMarker(coords, text) {
-        const now = Date.now();
-        await _sb.from('markers').insert([{ 
-            coords: coords, 
-            author: myNick, 
-            text: text, 
-            ts: now, 
-            exp: now + 7200000 
-        }]);
-        loadMarkers();
+    async function send() {
+        const el = document.getElementById('in');
+        const val = el.value.trim();
+        if (!val) return;
+        
+        await _sb.from('chat').insert([{ a: myNick, t: val, ts: Date.now() }]);
+        el.value = "";
+        loadChat();
     }
 
-    init();
+    start();
 </script>
 </body>
 </html>
