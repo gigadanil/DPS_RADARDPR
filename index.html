@@ -89,14 +89,13 @@
 <div id="map"></div>
 
 <script>
-    // КОНФИГУРАЦИЯ SUPABASE
-    const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co";
-    const SUPABASE_KEY = "sb_publishable_...ваша_публичная_ссылка...";
+    // КОНФИГУРАЦИЯ SUPABASE (Данные из твоих скриншотов)
+    const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co"; 
+    const SUPABASE_KEY = "sb_publishable_1Wp_bcQat_FXOdPjWTSxsw_9dctd8969b0548be0d4679092be019e075677b20d"; 
     const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const BAD_WORDS = ['хохол', 'укроп', 'война', 'всу', 'зеленский', 'путин', 'хуй', 'пидор', 'бля', 'ебал', 'сука'];
     const DNR_BOUNDS = { lat: [47.0, 49.2], lon: [36.5, 39.3] }; 
-    const SUPPORT_CONTACT = "@Joker_DNR_Admin";
 
     let myMap, myNick = localStorage.getItem('dnr_nick'), isAdmin = false, lastMsgTime = 0;
 
@@ -131,17 +130,9 @@
             myNick = prompt("Твой позывной:") || "Экипаж_" + Math.floor(Math.random()*99);
         }
 
-        // ПРОВЕРКА НА БАН
         const { data: ban } = await _sb.from('banned').select('*').eq('nick', myNick).single();
         if (ban) {
-            document.body.innerHTML = `
-            <div style="color:white; text-align:center; padding-top:50px; background:#121212; height:100vh;">
-                <h1>🚫 ДОСТУП ОГРАНИЧЕН</h1>
-                <p>Ваш ник <b>${myNick}</b> заблокирован.</p>
-                <p>Причина: ${ban.reason || 'Нарушение правил'}</p>
-                <hr style="width:50%; border:1px solid #333;">
-                <p>Для связи: <a href="https://t.me/${SUPPORT_CONTACT.replace('@','')}" style="color:#007bff">${SUPPORT_CONTACT}</a></p>
-            </div>`;
+            document.body.innerHTML = `<h1 style="color:white; text-align:center; padding-top:50px;">🚫 ДОСТУП ОГРАНИЧЕН<br><small>Ваш ник ${myNick} заблокирован</small></h1>`;
             return;
         }
 
@@ -180,7 +171,6 @@
     }
 
     async function startListeners() {
-        // Загрузка меток
         const loadMarkers = async () => {
             const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
             myMap.geoObjects.removeAll();
@@ -191,7 +181,6 @@
             document.getElementById('stat-m').innerText = count;
         };
 
-        // Загрузка чата
         const loadChat = async () => {
             const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
             const html = msgs ? msgs.reverse().map(m => {
@@ -210,7 +199,6 @@
             const cb = document.getElementById('chat-msgs'); cb.scrollTop = cb.scrollHeight;
         };
 
-        // Загрузка рейтинга
         const loadRatings = async () => {
             const { data: r } = await _sb.from('ratings').select('*');
             const rObj = {};
@@ -243,10 +231,8 @@
 
     async function adminAction(target) {
         if (!isAdmin || target === myNick) return;
-        const reason = prompt("ЗАБАНИТЬ пользователя " + target + "? Введите причину:");
-        if (reason !== null) {
-            await _sb.from('banned').insert([{ nick: target, reason: reason || "Нарушение правил" }]);
-            await _sb.from('markers').delete().eq('author', target); // Чистим метки
+        if (confirm("ЗАБАНИТЬ пользователя " + target + "?")) {
+            await _sb.from('banned').insert([{ nick: target }]);
             alert("Пользователь заблокирован!");
         }
     }
@@ -265,7 +251,7 @@
         const icons = { dps: '2555/2555013.png', spec: '2554/2554978.png', mobile: '809/809998.png', check: '2666/2666505.png' };
         const reportsCount = m.reports ? Object.keys(m.reports).length : 0;
         let commsHtml = "";
-        if (m.comments && Object.keys(m.comments).length > 0) {
+        if (m.comments) {
             commsHtml = Object.values(m.comments).map(c => `<div class="comm-item"><b>${c.a}:</b> ${c.t}</div>`).join('');
         }
 
@@ -291,3 +277,63 @@
                         ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" style="padding:2px 8px; font-size:9px; width:auto; margin:0;" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
                     </div>
                 </div>
+            </div>`
+        }, { iconLayout: 'default#image', iconImageHref: 'https://cdn-icons-png.flaticon.com/512/' + icons[m.type], iconImageSize: [34, 34] });
+        myMap.geoObjects.add(p);
+    }
+
+    async function addComment(mId) {
+        const input = document.getElementById('in-com-' + mId);
+        if (!input.value.trim() || !isClean(input.value)) return;
+        
+        const { data } = await _sb.from('markers').select('comments').eq('id', mId).single();
+        const newComments = data.comments || {};
+        const cId = Date.now();
+        newComments[cId] = { a: myNick, t: input.value.trim(), ts: cId };
+        
+        await _sb.from('markers').update({ comments: newComments }).eq('id', mId);
+        input.value = "";
+    }
+
+    async function reportM(mId, author) {
+        if (author === myNick) return;
+        const { data } = await _sb.from('markers').select('reports').eq('id', mId).single();
+        const newReports = data.reports || {};
+        newReports[myNick.replace(/\s/g, '_')] = true;
+        
+        if (Object.keys(newReports).length >= 3) {
+            await _sb.from('markers').delete().eq('id', mId);
+            updateRating(-50, author);
+        } else {
+            await _sb.from('markers').update({ reports: newReports }).eq('id', mId);
+        }
+    }
+
+    async function sendMsg() {
+        const i = document.getElementById('chat-in');
+        if (!i.value.trim() || !isClean(i.value) || Date.now() - lastMsgTime < 3000) return;
+        await _sb.from('chat').insert([{ a: myNick, t: i.value.trim(), ts: Date.now() }]);
+        lastMsgTime = Date.now(); i.value = '';
+    }
+
+    async function updateRating(p, user) {
+        const { data } = await _sb.from('ratings').select('score').eq('nick', user).single();
+        const newScore = (data ? data.score : 0) + p;
+        await _sb.from('ratings').upsert({ nick: user, score: newScore });
+    }
+
+    async function delM(id) { if(confirm("Удалить?")) await _sb.from('markers').delete().eq('id', id); }
+    async function delChatMsg(id) { await _sb.from('chat').delete().eq('id', id); }
+    async function adminClearAll() { if(isAdmin && confirm("УДАЛИТЬ ВСЁ?")) await _sb.from('markers').delete().neq('author', 'none'); }
+    function toggleBox(id) { document.getElementById(id).classList.toggle('hidden'); }
+    function goTo(c) { myMap.setCenter(c, 12, { duration: 500 }); }
+    function showLeaderboard() {
+        toggleBox('rating-modal');
+        const sorted = Object.entries(window.allRatings || {}).sort((a,b) => b[1] - a[1]);
+        document.getElementById('rating-list').innerHTML = sorted.map(([n, s], i) => `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #eee;"><span>${i+1}. <b>${n}</b></span><span style="color:green">${s}</span></div>`).join('');
+    }
+
+    login();
+</script>
+</body>
+</html>
