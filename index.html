@@ -27,6 +27,7 @@
         .chat-ctrl { padding: 10px; display: flex; gap: 6px; background: white; border-top: 1px solid #eee; }
         .btn { width: 100%; padding: 10px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 6px; color: white; transition: 0.2s; text-align: center; display: block; font-size: 12px; }
         .btn-blue { background: #007bff; } .btn-red { background: #d32f2f; } .btn-orange { background: #f39c12; } .btn-green { background: #2ecc71; } .btn-gray { background: #f0f0f0; color: #333; }
+        .btn-purple { background: #9b59b6; }
         .rating-box { margin-top: 8px; font-size: 15px; font-weight: bold; color: #1b5e20; background: #c8e6c9; padding: 6px; border-radius: 8px; text-align: center; cursor: pointer; }
         .input-style { width: 90%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; margin-bottom: 5px; }
         .hidden { display: none !important; }
@@ -89,9 +90,9 @@
 <div id="map"></div>
 
 <script>
-    // КОНФИГУРАЦИЯ SUPABASE (Данные из твоих скриншотов)
-    const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co"; 
-    const SUPABASE_KEY = "sb_publishable__RdzKz1jG3I1U3AMrgHNXw_TVOfcPZX"; 
+    // КОНФИГУРАЦИЯ SUPABASE
+    const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_1Wp_bcQat_FXOdPjWTSxsw_9dctd8969b0548be0d4679092be019e075677b20d"; 
     const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const BAD_WORDS = ['хохол', 'укроп', 'война', 'всу', 'зеленский', 'путин', 'хуй', 'пидор', 'бля', 'ебал', 'сука'];
@@ -170,46 +171,47 @@
         });
     }
 
-    async function startListeners() {
-        const loadMarkers = async () => {
-            const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
-            myMap.geoObjects.removeAll();
-            let count = 0;
-            if (markers) {
-                markers.forEach(m => { renderM(m, m.id); count++; });
-            }
-            document.getElementById('stat-m').innerText = count;
-        };
+    async function loadMarkers() {
+        const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
+        myMap.geoObjects.removeAll();
+        let count = 0;
+        if (markers) {
+            markers.forEach(m => { renderM(m, m.id); count++; });
+        }
+        document.getElementById('stat-m').innerText = count;
+    }
 
-        const loadChat = async () => {
-            const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
-            const html = msgs ? msgs.reverse().map(m => {
-                const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                const isAdm = m.a === 'Джокер_ДНР';
-                return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
-                    <div class="msg-meta">
-                        <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
-                        <span>${timeStr}</span>
-                    </div>
-                    <div>${m.t}</div>
-                    ${(m.a === myNick || isAdmin) ? `<span onclick="delChatMsg('${m.id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>` : ''}
-                </div>`;
-            }).join('') : '';
-            document.getElementById('chat-msgs').innerHTML = html;
-            const cb = document.getElementById('chat-msgs'); cb.scrollTop = cb.scrollHeight;
-        };
+    async function loadChat() {
+        const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
+        const html = msgs ? msgs.reverse().map(m => {
+            const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const isAdm = m.a === 'Джокер_ДНР';
+            return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
+                <div class="msg-meta">
+                    <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
+                    <span>${timeStr}</span>
+                </div>
+                <div>${m.t}</div>
+                ${(m.a === myNick || isAdmin) ? `<span onclick="delChatMsg('${m.id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>` : ''}
+            </div>`;
+        }).join('') : '';
+        document.getElementById('chat-msgs').innerHTML = html;
+        const cb = document.getElementById('chat-msgs'); cb.scrollTop = cb.scrollHeight;
+    }
 
-        const loadRatings = async () => {
-            const { data: r } = await _sb.from('ratings').select('*');
-            const rObj = {};
-            if(r) r.forEach(row => rObj[row.nick] = row.score);
-            document.getElementById('u-rating-val').innerText = rObj[myNick] || 0;
-            window.allRatings = rObj;
-        };
+    async function loadRatings() {
+        const { data: r } = await _sb.from('ratings').select('*');
+        const rObj = {};
+        if(r) r.forEach(row => rObj[row.nick] = row.score);
+        document.getElementById('u-rating-val').innerText = rObj[myNick] || 0;
+        window.allRatings = rObj;
+    }
 
+    function startListeners() {
         loadMarkers(); loadChat(); loadRatings();
-        setInterval(loadMarkers, 20000);
-        setInterval(loadChat, 5000);
+        // УСКОРЕННОЕ ОБНОВЛЕНИЕ
+        setInterval(loadMarkers, 3000); 
+        setInterval(loadChat, 2000);
 
         myMap.events.add('click', e => {
             const coords = e.get('coords');
@@ -229,14 +231,6 @@
         });
     }
 
-    async function adminAction(target) {
-        if (!isAdmin || target === myNick) return;
-        if (confirm("ЗАБАНИТЬ пользователя " + target + "?")) {
-            await _sb.from('banned').insert([{ nick: target }]);
-            alert("Пользователь заблокирован!");
-        }
-    }
-
     async function saveM(coords, type) {
         const txt = document.getElementById('m-txt').value || "Работают";
         const img = document.getElementById('m-img-url').value.trim();
@@ -245,6 +239,7 @@
         await _sb.from('markers').insert([{ coords, type, author: myNick, text: txt, img, ts: now, exp: now + 7200000 }]);
         updateRating(10, myNick);
         myMap.balloon.close();
+        loadMarkers(); // Мгновенное появление
     }
 
     function renderM(m, id) {
@@ -285,14 +280,13 @@
     async function addComment(mId) {
         const input = document.getElementById('in-com-' + mId);
         if (!input.value.trim() || !isClean(input.value)) return;
-        
         const { data } = await _sb.from('markers').select('comments').eq('id', mId).single();
         const newComments = data.comments || {};
         const cId = Date.now();
         newComments[cId] = { a: myNick, t: input.value.trim(), ts: cId };
-        
         await _sb.from('markers').update({ comments: newComments }).eq('id', mId);
         input.value = "";
+        loadMarkers();
     }
 
     async function reportM(mId, author) {
@@ -300,31 +294,33 @@
         const { data } = await _sb.from('markers').select('reports').eq('id', mId).single();
         const newReports = data.reports || {};
         newReports[myNick.replace(/\s/g, '_')] = true;
-        
         if (Object.keys(newReports).length >= 3) {
             await _sb.from('markers').delete().eq('id', mId);
             updateRating(-50, author);
         } else {
             await _sb.from('markers').update({ reports: newReports }).eq('id', mId);
         }
+        loadMarkers();
     }
 
     async function sendMsg() {
         const i = document.getElementById('chat-in');
-        if (!i.value.trim() || !isClean(i.value) || Date.now() - lastMsgTime < 3000) return;
+        if (!i.value.trim() || !isClean(i.value) || Date.now() - lastMsgTime < 2000) return;
         await _sb.from('chat').insert([{ a: myNick, t: i.value.trim(), ts: Date.now() }]);
         lastMsgTime = Date.now(); i.value = '';
+        loadChat(); // Мгновенно
     }
 
     async function updateRating(p, user) {
         const { data } = await _sb.from('ratings').select('score').eq('nick', user).single();
         const newScore = (data ? data.score : 0) + p;
         await _sb.from('ratings').upsert({ nick: user, score: newScore });
+        loadRatings();
     }
 
-    async function delM(id) { if(confirm("Удалить?")) await _sb.from('markers').delete().eq('id', id); }
-    async function delChatMsg(id) { await _sb.from('chat').delete().eq('id', id); }
-    async function adminClearAll() { if(isAdmin && confirm("УДАЛИТЬ ВСЁ?")) await _sb.from('markers').delete().neq('author', 'none'); }
+    async function delM(id) { if(confirm("Удалить?")) { await _sb.from('markers').delete().eq('id', id); loadMarkers(); } }
+    async function delChatMsg(id) { await _sb.from('chat').delete().eq('id', id); loadChat(); }
+    async function adminClearAll() { if(isAdmin && confirm("УДАЛИТЬ ВСЁ?")) { await _sb.from('markers').delete().neq('author', 'none'); loadMarkers(); } }
     function toggleBox(id) { document.getElementById(id).classList.toggle('hidden'); }
     function goTo(c) { myMap.setCenter(c, 12, { duration: 500 }); }
     function showLeaderboard() {
@@ -337,5 +333,3 @@
 </script>
 </body>
 </html>
-
-
