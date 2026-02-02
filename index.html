@@ -90,10 +90,9 @@
 
 <script>
     const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co"; 
-    // Вставлен твой верный Anon ключ:
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2bXZybG1zeXBhZHNmZHl4dHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NDM2NDMsImV4cCI6MjA4NTUxOTY0M30.-vBcZlR50YPWotq0dAdocn_HVHcS8jZwtoJjuBixozI"; 
     
-    // Инициализация через window для надежности
+    // Инициализация
     const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const BAD_WORDS = ['хохол', 'укроп', 'война', 'всу', 'зеленский', 'путин', 'хуй', 'пидор', 'бля', 'ебал', 'сука'];
@@ -123,7 +122,7 @@
         }
     };
 
-    // Полностью переписанная функция чата, чтобы исключить SyntaxError
+    // Исправленная функция чата (убрана ошибка синтаксиса строки 127)
     const loadChat = async () => {
         const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
         
@@ -135,23 +134,23 @@
         const html = msgs.reverse().map(m => {
             const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             
-            // Определяем админа безопасным способом
+            // Проверка на админа без сложных вложенностей
             let isAdm = false;
             if (m.a === 'Джокер_ДНР' || m.a === 'Bulgakov_pisatel' || m.role === 'admin') {
                 isAdm = true;
             }
 
-            // Формируем стили
+            // Классы и стили
             let adminClass = isAdm ? 'msg-admin' : '';
             let nameColor = isAdm ? 'color:red' : 'color:#007bff';
             
-            // Кнопка удаления
+            // Кнопка удаления (формируем отдельно, чтобы не ломать строку)
             let delBtn = '';
             if (m.a === myNick || isAdmin) {
                 delBtn = `<span onclick="delChatMsg('${m.id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>`;
             }
 
-            // Возвращаем HTML строку
+            // Безопасная сборка HTML
             return `<div class="msg-cloud ${adminClass}">
                         <div class="msg-meta">
                             <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${nameColor}">${m.a}</b>
