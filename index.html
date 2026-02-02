@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>РАДАР ДПС ДНР — ОПЕРАТИВНЫЙ ШТАБ</title>
 
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/854/854878.png">
+
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://api-maps.yandex.ru/2.1/?apikey=7f7db9e2-0eff-47d4-98d3-59b326552ed7&lang=ru_RU" type="text/javascript"></script>
@@ -85,19 +90,20 @@
 
 <script>
     const SUPABASE_URL = "https://qvmvrlmsypadsfdyxtqh.supabase.co"; 
-    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2bXZybG1zeXBhZHNmZHl4dHFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk5NDM2NDMsImV4cCI6MjA4NTUxOTY0M30.-vBcZlR50YPWotq0dAdocn_HVHcS8jZwtoJjuBixozI"; 
-    const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const SUPABASE_KEY = "sb_publishable__RdzKz1jG3I1U3AMrgHNXw_TVOfcPZX"; 
+    const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     const BAD_WORDS = ['хохол', 'укроп', 'война', 'всу', 'зеленский', 'путин', 'хуй', 'пидор', 'бля', 'ебал', 'сука'];
     const DNR_BOUNDS = { lat: [47.0, 49.2], lon: [36.5, 39.3] }; 
 
     let myMap, myNick = localStorage.getItem('dnr_nick'), isAdmin = false, lastMsgTime = 0;
 
+    // --- СИСТЕМА БАНА ---
     async function checkBan() {
         if (!myNick) return false;
         const { data: ban } = await _sb.from('banned').select('*').eq('nick', myNick).single();
         if (ban) {
-            document.body.innerHTML = `<div style="color:white; text-align:center; padding-top:100px; font-family:sans-serif;"><h1>🚫 ДОСТУП ОГРАНИЧЕН</h1></div>`;
+            document.body.innerHTML = `<div style="color:white; text-align:center; padding-top:100px; font-family:sans-serif;"><h1>🚫 ДОСТУП ОГРАНИЧЕН</h1><p>Ваш позывной <b>${myNick}</b> заблокирован администрацией.</p></div>`;
             return true;
         }
         return false;
@@ -105,36 +111,36 @@
 
     const loadMarkers = async () => {
         const { data: markers } = await _sb.from('markers').select('*').gt('exp', Date.now());
-        if (myMap && markers) {
-            myMap.geoObjects.removeAll();
-            markers.forEach(m => renderM(m, m.id));
-            document.getElementById('stat-m').innerText = markers.length;
+        myMap.geoObjects.removeAll();
+        let count = 0;
+        if (markers) {
+            markers.forEach(m => { renderM(m, m.id); count++; });
         }
+        document.getElementById('stat-m').innerText = count;
     };
 
     const loadChat = async () => {
         const { data: msgs } = await _sb.from('chat').select('*').order('ts', { ascending: false }).limit(30);
-        if (!msgs) return;
-        const html = msgs.reverse().map(m => {
+        const html = msgs ? msgs.reverse().map(m => {
             const timeStr = new Date(m.ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-            const isAdm = (m.a === 'Джокер_ДНР' || m.a === 'Bulgakov_pisatel' || m.role === 'admin');
+            const isAdm = m.a === 'Джокер_ДНР''Bulgakov_pisatel' || m.role === 'admin';
             return `<div class="msg-cloud ${isAdm ? 'msg-admin' : ''}">
                 <div class="msg-meta">
                     <b onclick="adminAction('${m.a}')" style="cursor:pointer; ${isAdm ? 'color:red' : 'color:#007bff'}">${m.a}</b>
                     <span>${timeStr}</span>
                 </div>
                 <div>${m.t}</div>
+                ${(m.a === myNick || isAdmin) ? `<span onclick="delChatMsg('${m.id}')" style="position:absolute; right:5px; bottom:2px; color:red; cursor:pointer; font-size:9px;">удалить</span>` : ''}
             </div>`;
-        }).join('');
+        }).join('') : '';
         document.getElementById('chat-msgs').innerHTML = html;
         const cb = document.getElementById('chat-msgs'); cb.scrollTop = cb.scrollHeight;
     };
 
     const loadRatings = async () => {
         const { data: r } = await _sb.from('ratings').select('*');
-        if(!r) return;
         const rObj = {};
-        r.forEach(row => rObj[row.nick] = row.score);
+        if(r) r.forEach(row => rObj[row.nick] = row.score);
         document.getElementById('u-rating-val').innerText = rObj[myNick] || 0;
         window.allRatings = rObj;
     };
@@ -142,32 +148,51 @@
     function isClean(text) {
         if(!text) return true;
         const low = text.toLowerCase();
-        for (let word of BAD_WORDS) { if (low.includes(word)) return false; }
+        for (let word of BAD_WORDS) { if (low.includes(word)) { alert("Запрещенное слово!"); return false; } }
         return true;
+    }
+
+    function isInZone(coords) {
+        const [lat, lon] = coords;
+        return lat >= DNR_BOUNDS.lat[0] && lat <= DNR_BOUNDS.lat[1] && lon >= DNR_BOUNDS.lon[0] && lon <= DNR_BOUNDS.lon[1];
     }
 
     async function login() {
         const tg = window.Telegram.WebApp;
-        let tgId = (tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user.id.toString() : "";
+        let tempNick = "";
 
-        if (tgId) {
-            const { data: user } = await _sb.from('users').select('*').eq('tg_id', tgId).single();
-            if (user) { myNick = user.nick; }
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            const tgUser = tg.initDataUnsafe.user;
+            tempNick = tgUser.username || ("id" + tgUser.id);
+            const { data: user } = await _sb.from('users').select('*').eq('nick', tempNick).single();
+            if (!user) {
+                const roleSetting = (tempNick === 'Джокер_ДНР') ? 'admin' : 'driver';
+                await _sb.from('users').insert([{ nick: tempNick, password: "123", role: roleSetting, tg_id: tgUser.id.toString() }]);
+            }
+            myNick = tempNick;
         }
 
         if (!myNick) {
-            let chosenNick = prompt("Придумайте позывной:");
-            if (chosenNick) {
-                myNick = chosenNick.trim();
-                await _sb.from('users').insert([{ nick: myNick, tg_id: tgId, role: 'driver' }]);
-            }
+            myNick = prompt("Твой позывной:") || "Экипаж_" + Math.floor(Math.random()*99);
         }
 
         if (await checkBan()) return;
-        
-        const { data: userData } = await _sb.from('users').select('*').eq('nick', myNick).single();
-        if (userData && userData.role === 'admin') isAdmin = true;
 
+        const { data: userData } = await _sb.from('users').select('*').eq('nick', myNick).single();
+        if (userData) {
+            if (userData.role === 'admin' || myNick === 'Джокер_ДНР') isAdmin = true;
+            
+            if (userData.password && !tg.initDataUnsafe.user) {
+                let savedPass = localStorage.getItem('dnr_pass');
+                let pass = savedPass || prompt(`Ник "${myNick}" защищен. Пароль:`);
+                if (pass === userData.password.toString()) {
+                    localStorage.setItem('dnr_pass', pass);
+                } else {
+                    alert("Ошибка!"); location.reload(); return;
+                }
+            }
+        }
+        
         localStorage.setItem('dnr_nick', myNick);
         initApp();
     }
@@ -176,47 +201,150 @@
         ymaps.ready(() => {
             myMap = new ymaps.Map("map", { center: [48.01, 37.80], zoom: 11, controls: ['zoomControl'] });
             document.getElementById('u-nick').innerText = myNick;
-            if (isAdmin) {
-                document.getElementById('adm-tag').style.display = 'inline';
-                document.getElementById('admin-panel').style.display = 'block';
+            if (isAdmin) { 
+                document.getElementById('adm-tag').style.display = 'inline'; 
+                document.getElementById('admin-panel').style.display = 'block'; 
             }
-            loadMarkers(); loadChat(); loadRatings();
-            setInterval(loadMarkers, 10000);
-            setInterval(loadChat, 4000);
-
-            myMap.events.add('click', e => {
-                const coords = e.get('coords');
-                myMap.balloon.open(coords, `
-                    <div style="color:#333; width:220px;">
-                        <b>Новая метка:</b><br>
-                        <input id="m-txt" class="input-style" placeholder="Комментарий">
-                        <button class="btn btn-blue" onclick="saveM([${coords}], 'dps')">🚔 ДПС</button>
-                    </div>`);
-            });
+            startListeners();
         });
     }
 
+    async function startListeners() {
+        loadMarkers(); loadChat(); loadRatings();
+        setInterval(loadMarkers, 10000);
+        setInterval(loadChat, 4000);
+
+        myMap.events.add('click', e => {
+            const coords = e.get('coords');
+            if (!isInZone(coords)) { alert("Только в пределах ДНР!"); return; }
+            myMap.balloon.open(coords, `
+                <div style="color:#333; width:220px;">
+                    <b>Добавить метку:</b><br>
+                    <input id="m-txt" class="input-style" placeholder="Комментарий">
+                    <input id="m-img-url" class="input-style" placeholder="Ссылка на фото">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-top:5px;">
+                        <button class="btn btn-blue" onclick="saveM([${coords}], 'dps')">🚔 ДПС</button>
+                        <button class="btn btn-red" onclick="saveM([${coords}], 'spec')">🚨 Спецбат</button>
+                        <button class="btn btn-orange" onclick="saveM([${coords}], 'mobile')">🚗 Подвижной</button>
+                        <button class="btn btn-purple" onclick="saveM([${coords}], 'check')">📄 Проверка</button>
+                    </div>
+                </div>`);
+        });
+    }
+
+    async function sendMsg() {
+        if (await checkBan()) return;
+        const i = document.getElementById('chat-in');
+        const val = i.value.trim();
+        if (!val || !isClean(val) || Date.now() - lastMsgTime < 2000) return;
+
+        if (val.toLowerCase() === '/admin') {
+            i.value = '';
+            if (!isAdmin) { systemNotify("Отказ: нет прав."); return; }
+            const { count: uTotal } = await _sb.from('users').select('*', { count: 'exact', head: true });
+            const { count: cAct } = await _sb.from('chat').select('*', { count: 'exact', head: true }).gt('ts', Date.now() - 900000);
+            systemNotify(`📊 ШТАБ: Всего юзеров: ${uTotal}, Актив (15м): ${cAct}`);
+            return;
+        }
+
+        await _sb.from('chat').insert([{ a: myNick, t: val, ts: Date.now() }]);
+        lastMsgTime = Date.now(); i.value = '';
+        loadChat();
+    }
+
+    function systemNotify(text) {
+        const chatMsgs = document.getElementById('chat-msgs');
+        const note = document.createElement('div');
+        note.style = "background: #34495e; color: #f1c40f; padding: 8px; border-radius: 8px; font-size: 11px; margin: 5px 0; border-left: 4px solid #f1c40f;";
+        note.innerHTML = `<b>СИСТЕМА:</b> ${text}`;
+        chatMsgs.appendChild(note);
+        chatMsgs.scrollTop = chatMsgs.scrollHeight;
+    }
+
+    async function adminAction(target) {
+        if (!isAdmin || target === myNick) return;
+        if (confirm("ЗАБАНИТЬ пользователя " + target + "?")) {
+            await _sb.from('banned').insert([{ nick: target }]);
+            alert("Ник заблокирован!");
+            loadChat();
+        }
+    }
+
     async function saveM(coords, type) {
+        if (await checkBan()) return;
         const txt = document.getElementById('m-txt').value || "Работают";
+        const img = document.getElementById('m-img-url').value.trim();
+        if(!isClean(txt) || !isClean(img)) return;
         const now = Date.now();
-        await _sb.from('markers').insert([{ coords, type, author: myNick, text: txt, ts: now, exp: now + 7200000 }]);
+        await _sb.from('markers').insert([{ coords, type, author: myNick, text: txt, img, ts: now, exp: now + 7200000 }]);
+        updateRating(10, myNick);
         myMap.balloon.close();
         loadMarkers();
     }
 
     function renderM(m, id) {
+        const icons = { dps: '2555/2555013.png', spec: '2554/2554978.png', mobile: '809/809998.png', check: '2666/2666505.png' };
+        const reportsCount = m.reports ? Object.keys(m.reports).length : 0;
+        let commsHtml = m.comments ? Object.values(m.comments).map(c => `<div class="comm-item"><b>${c.a}:</b> ${c.t}</div>`).join('') : "";
+        
         const p = new ymaps.Placemark(m.coords, {
-            balloonContent: `<b>${m.type.toUpperCase()}</b><br><i>${m.text}</i>`
-        }, { iconLayout: 'default#image', iconImageHref: 'https://cdn-icons-png.flaticon.com/512/2555/2555013.png', iconImageSize: [30, 30] });
+            balloonContent: `<div style="width:220px; font-size:12px;">
+                <div style="display:flex; justify-content:space-between;"><b>${m.type.toUpperCase()}</b> <small>${new Date(m.ts).toLocaleTimeString()}</small></div>
+                <i>${m.text}</i><br>
+                ${m.img ? `<img src="${m.img}" class="m-img">` : ''}
+                <div class="comm-box">
+                    <div id="comms-${id}" style="max-height:50px; overflow-y:auto;">${commsHtml || 'Нет комментариев'}</div>
+                    <input id="in-com-${id}" class="input-style" style="width:70%; height:18px; font-size:10px;" placeholder="Текст...">
+                    <button onclick="addComment('${id}')" style="width:20%; height:20px;">+</button>
+                </div>
+                <button class="btn btn-orange" onclick="reportM('${id}', '${m.author}')">🚫 ОБМАН (${reportsCount})</button>
+                ${(m.author === myNick || isAdmin) ? `<button class="btn btn-red" onclick="delM('${id}')">УДАЛИТЬ</button>` : ''}
+            </div>`
+        }, { iconLayout: 'default#image', iconImageHref: 'https://cdn-icons-png.flaticon.com/512/' + icons[m.type], iconImageSize: [34, 34] });
         myMap.geoObjects.add(p);
     }
 
+    async function addComment(mId) {
+        if (await checkBan()) return;
+        const input = document.getElementById('in-com-' + mId);
+        if (!input.value.trim() || !isClean(input.value)) return;
+        const { data } = await _sb.from('markers').select('comments').eq('id', mId).single();
+        const newComments = data.comments || {};
+        const cId = Date.now();
+        newComments[cId] = { a: myNick, t: input.value.trim(), ts: cId };
+        await _sb.from('markers').update({ comments: newComments }).eq('id', mId);
+        input.value = ""; loadMarkers();
+    }
+
+    async function reportM(mId, author) {
+        if (await checkBan()) return;
+        const { data } = await _sb.from('markers').select('reports').eq('id', mId).single();
+        const newReports = data.reports || {};
+        newReports[myNick.replace(/\s/g, '_')] = true;
+        if (Object.keys(newReports).length >= 3) {
+            await _sb.from('markers').delete().eq('id', mId);
+            updateRating(-50, author);
+        } else {
+            await _sb.from('markers').update({ reports: newReports }).eq('id', mId);
+        }
+        loadMarkers();
+    }
+
+    async function updateRating(p, user) {
+        const { data } = await _sb.from('ratings').select('score').eq('nick', user).single();
+        await _sb.from('ratings').upsert({ nick: user, score: (data ? data.score : 0) + p });
+        loadRatings();
+    }
+
+    async function delM(id) { if(confirm("Удалить?")) { await _sb.from('markers').delete().eq('id', id); loadMarkers(); } }
+    async function delChatMsg(id) { await _sb.from('chat').delete().eq('id', id); loadChat(); }
+    async function adminClearAll() { if(isAdmin && confirm("УДАЛИТЬ ВСЁ?")) { await _sb.from('markers').delete().neq('author', 'none'); loadMarkers(); } }
     function toggleBox(id) { document.getElementById(id).classList.toggle('hidden'); }
     function goTo(c) { myMap.setCenter(c, 12, { duration: 500 }); }
     function showLeaderboard() {
         toggleBox('rating-modal');
         const sorted = Object.entries(window.allRatings || {}).sort((a,b) => b[1] - a[1]);
-        document.getElementById('rating-list').innerHTML = sorted.map(([n, s], i) => `<div>${i+1}. ${n}: ${s}</div>`).join('');
+        document.getElementById('rating-list').innerHTML = sorted.map(([n, s], i) => `<div style="display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #eee;"><span>${i+1}. <b>${n}</b></span><span style="color:green">${s}</span></div>`).join('');
     }
 
     login();
